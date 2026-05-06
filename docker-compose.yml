@@ -3,15 +3,19 @@ services:
     image: postgres:latest
     container_name: postgres_primary
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/18/docker
     ports:
       - "5432:5432"
     volumes:
       - primary_data:/var/lib/postgresql
       - ./src/libs/db/primary/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./src/libs/db/primary/init-replication.sh:/docker-entrypoint-initdb.d/02-init-replication.sh:ro
     command: >
       postgres
       -c wal_level=replica
@@ -30,31 +34,99 @@ services:
     image: postgres:latest
     container_name: postgres_replica
     restart: unless-stopped
+    user: postgres
+    env_file:
+      - .env
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       REPLICATION_USER: ${REPLICATION_USER}
       REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      PGPASSWORD: ${REPLICATION_PASSWORD}
+      PGDATA: /var/lib/postgresql/18/docker
     ports:
       - "5433:5432"
     volumes:
       - replica_data:/var/lib/postgresql
-      - ./src/libs/db/replica/standby.conf:/etc/postgresql/conf.d/standby.conf:ro
-    command: >
-      bash -c "
-        cp /usr/share/postgresql/postgresql.conf.sample /var/lib/postgresql/data/postgresql.conf 2>/dev/null || true;
-        echo 'standby_mode = ON' >> /var/lib/postgresql/data/postgresql.conf;
-        echo 'primary_conninfo = ''host=postgres_primary port=5432 user=${REPLICATION_USER} password=${REPLICATION_PASSWORD} application_name=postgres_replica''' >> /var/lib/postgresql/data/postgresql.conf;
-        echo 'primary_slot_name = ''replica_slot''' >> /var/lib/postgresql/data/postgresql.conf;
-        echo 'restore_command = ''/bin/true''' >> /var/lib/postgresql/data/postgresql.conf;
-        postgres
-      "
+    entrypoint:
+      - /bin/bash
+      - -ceu
+      - |
+        mkdir -p "$$PGDATA"
+        chmod 700 "$$PGDATA"
+        if [ ! -s "$$PGDATA/PG_VERSION" ]; then
+          rm -rf "$$PGDATA"/*
+          until pg_basebackup -h postgres_primary -p 5432 -D "$$PGDATA" -U "$$REPLICATION_USER" -Fp -Xs -P -R; do
+            echo "Waiting for primary to accept replication connections..."
+            rm -rf "$$PGDATA"/*
+            sleep 2
+          done
+        fi
+        exec postgres
     depends_on:
       postgres_primary:
         condition: service_healthy
-    volumes_from:
-      - postgres_primary:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  server_1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: my-server:latest
+    container_name: server_1
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - SERVER_ID=server_1
+      - PORT=3000
+      - WRITE_DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_primary:5432/${POSTGRES_DB}
+      - READ_DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_replica:5432/${POSTGRES_DB}
+    expose:
+      - "3000"
+    depends_on:
+      postgres_primary:
+        condition: service_healthy
+      postgres_replica:
+        condition: service_healthy
+
+  server_2:
+    image: my-server:latest
+    container_name: server_2
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - SERVER_ID=server_2
+      - PORT=3000
+      - WRITE_DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_primary:5432/${POSTGRES_DB}
+      - READ_DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_replica:5432/${POSTGRES_DB}
+    expose:
+      - "3000"
+    depends_on:
+      postgres_primary:
+        condition: service_healthy
+      postgres_replica:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - server_1
+      - server_2
 
 volumes:
   primary_data:

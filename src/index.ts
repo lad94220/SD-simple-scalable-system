@@ -1,6 +1,6 @@
 import express, { type Request, type Response } from "express";
 import dotenv from "dotenv";
-import { createProduct, getProducts } from "./services/productService";
+import { createProduct, getProducts } from "./services/productService.js";
 
 dotenv.config();
 

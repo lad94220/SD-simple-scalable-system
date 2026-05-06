@@ -1,9 +1,25 @@
 -- Primary initialization script
 -- Create replication slot for replica
-SELECT pg_create_physical_replication_slot('replica_slot', false);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_replication_slots WHERE slot_name = 'replica_slot'
+    ) THEN
+        PERFORM pg_create_physical_replication_slot('replica_slot', false);
+    END IF;
+END
+$$;
 
 -- Create replication user
-CREATE USER repluser WITH REPLICATION ENCRYPTED PASSWORD 'replpassword123';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = 'repluser'
+    ) THEN
+        CREATE ROLE repluser WITH REPLICATION LOGIN ENCRYPTED PASSWORD 'replpassword123';
+    END IF;
+END
+$$;
 
 -- Create products table
 CREATE TABLE IF NOT EXISTS products (

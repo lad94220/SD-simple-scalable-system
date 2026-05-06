@@ -1,4 +1,4 @@
-import { writePool, readPool } from "../libs/db";
+import { writePool, readPool } from "../libs/db.js";
 
 interface Product {
   id: number;
