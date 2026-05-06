@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
-cat >> "$PGDATA/pg_hba.conf" <<'EOF'
-host replication repluser all scram-sha-256
+replication_user="${REPLICATION_USER:-repluser}"
+
+cat >> "$PGDATA/pg_hba.conf" <<EOF
+host replication ${replication_user} all scram-sha-256
 EOF

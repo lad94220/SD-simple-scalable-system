@@ -1,4 +1,16 @@
 -- Primary initialization script
+DO $$
+BEGIN
+    IF current_setting('app.replication_user', true) IS NULL THEN
+        PERFORM set_config('app.replication_user', 'repluser', false);
+    END IF;
+
+    IF current_setting('app.replication_password', true) IS NULL THEN
+        PERFORM set_config('app.replication_password', 'replpassword123', false);
+    END IF;
+END
+$$;
+
 -- Create replication slot for replica
 DO $$
 BEGIN
@@ -14,9 +26,15 @@ $$;
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_roles WHERE rolname = 'repluser'
+        SELECT 1
+        FROM pg_roles
+        WHERE rolname = current_setting('app.replication_user')
     ) THEN
-        CREATE ROLE repluser WITH REPLICATION LOGIN ENCRYPTED PASSWORD 'replpassword123';
+        EXECUTE format(
+            'CREATE ROLE %I WITH REPLICATION LOGIN ENCRYPTED PASSWORD %L',
+            current_setting('app.replication_user'),
+            current_setting('app.replication_password')
+        );
     END IF;
 END
 $$;
@@ -34,4 +52,11 @@ GRANT ALL PRIVILEGES ON TABLE products TO appuser;
 GRANT ALL PRIVILEGES ON SEQUENCE products_id_seq TO appuser;
 
 -- Grant replication permissions
-GRANT SELECT ON products TO repluser;
+DO $$
+BEGIN
+    EXECUTE format(
+        'GRANT SELECT ON products TO %I',
+        current_setting('app.replication_user')
+    );
+END
+$$;

@@ -12,11 +12,13 @@ interface CreateProductInput {
   price: number;
 }
 
-export async function createProduct(input: CreateProductInput): Promise<void> {
-  await writePool.query(
-    "INSERT INTO products (name, price) VALUES ($1, $2)",
+export async function createProduct(input: CreateProductInput): Promise<Product> {
+  const result = await writePool.query<Product>(
+    "INSERT INTO products (name, price) VALUES ($1, $2) RETURNING *",
     [input.name, input.price]
   );
+
+  return result.rows[0]!;
 }
 
 export async function getProducts(): Promise<Product[]> {

@@ -11,6 +11,10 @@ interface ProductBody {
 
 const app = express();
 app.use(express.json());
+app.use((req, _res, next) => {
+  console.log(`[${process.env.SERVER_ID}] ${req.method} ${req.path}`);
+  next();
+});
 
 app.post("/products", async (req: Request, res: Response) => {
   const { name, price }: ProductBody = req.body;
@@ -20,10 +24,11 @@ app.post("/products", async (req: Request, res: Response) => {
   }
 
   try {
-    await createProduct({ name, price });
+    const product = await createProduct({ name, price });
 
     res.status(201).json({
       message: "Product created",
+      data: product,
       processed_by: process.env.SERVER_ID,
     });
   } catch (error) {
